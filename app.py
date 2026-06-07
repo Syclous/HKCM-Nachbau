@@ -47,6 +47,9 @@ pivot_distance = st.sidebar.slider("Pivot-Sensitivität (Kerzen)", min_value=3, 
 @st.cache_data(ttl=300)
 def load_data(symbol, per, inter):
     df = yf.download(symbol, period=per, interval=inter)
+    # Fix für verschachtelte Spalten (MultiIndex) bei yfinance
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
     return df
 
 data = load_data(ticker_cleaned, period, interval)
@@ -54,14 +57,14 @@ data = load_data(ticker_cleaned, period, interval)
 if data.empty:
     st.error("Keine Daten vom Server empfangen. Bitte anderen Zeitraum oder Ticker wählen.")
 else:
-    # Bereinigung der X-Achse (Datum/Zeit)
+    # Saubere Konvertierung des Datums/Zeit-Index für die X-Achse
     time_index = data.index.strftime('%Y-%m-%d %H:%M').tolist()
     
-    # Konvertierung der Preise in reine Python-Listen (behebt alle Plotly-Bugs)
-    close_prices = data['Close'].squeeze().fillna(method='ffill').tolist()
-    high_prices = data['High'].squeeze().fillna(method='ffill').tolist()
-    low_prices = data['Low'].squeeze().fillna(method='ffill').tolist()
-    open_prices = data['Open'].squeeze().fillna(method='ffill').tolist()
+    # Behebt den TypeError durch Nutzung der modernen .ffill() Funktion
+    close_prices = data['Close'].squeeze().ffill().tolist()
+    high_prices = data['High'].squeeze().ffill().tolist()
+    low_prices = data['Low'].squeeze().ffill().tolist()
+    open_prices = data['Open'].squeeze().ffill().tolist()
 
     # --- SQUEEZE MOMENTUM INDIKATOR BERECHNUNG ---
     close_series = pd.Series(close_prices)
@@ -138,7 +141,7 @@ else:
         name=ticker_cleaned
     ), row=1, col=1)
 
-    # Elliott-Wellen Labels einzeichnen (Hier lagen die Probleme - jetzt absolut sicher gelöst)
+    # Elliott-Wellen Labels einzeichnen
     if len(peaks_high) > 0:
         fig.add_trace(go.Scatter(
             x=[time_index[p] for p in peaks_high], 
