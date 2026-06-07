@@ -54,13 +54,14 @@ data = load_data(ticker_cleaned, period, interval)
 if data.empty:
     st.error("Keine Daten vom Server empfangen. Bitte anderen Zeitraum oder Ticker wählen.")
 else:
-    # Saubere Konvertierung des Index für Plotly
-    time_index = data.index.to_numpy()
+    # Bereinigung der X-Achse (Datum/Zeit)
+    time_index = data.index.strftime('%Y-%m-%d %H:%M').tolist()
     
-    close_prices = data['Close'].squeeze().to_numpy()
-    high_prices = data['High'].squeeze().to_numpy()
-    low_prices = data['Low'].squeeze().to_numpy()
-    open_prices = data['Open'].squeeze().to_numpy()
+    # Konvertierung der Preise in reine Python-Listen (behebt alle Plotly-Bugs)
+    close_prices = data['Close'].squeeze().fillna(method='ffill').tolist()
+    high_prices = data['High'].squeeze().fillna(method='ffill').tolist()
+    low_prices = data['Low'].squeeze().fillna(method='ffill').tolist()
+    open_prices = data['Open'].squeeze().fillna(method='ffill').tolist()
 
     # --- SQUEEZE MOMENTUM INDIKATOR BERECHNUNG ---
     close_series = pd.Series(close_prices)
@@ -94,8 +95,8 @@ else:
     val_smooth = val.rolling(window=length).mean()
 
     # --- DYNAMISCHER PIVOT / WELLEN ALGORITHMUS ---
-    peaks_high, _ = find_peaks(high_prices, distance=pivot_distance)
-    peaks_low, _ = find_peaks(-low_prices, distance=pivot_distance)
+    peaks_high, _ = find_peaks(np.array(high_prices), distance=pivot_distance)
+    peaks_low, _ = find_peaks(-np.array(low_prices), distance=pivot_distance)
 
     # Letzte markante Wendepunkte ermitteln
     last_high_idx = peaks_high[-1] if len(peaks_high) > 0 else 0
@@ -137,10 +138,11 @@ else:
         name=ticker_cleaned
     ), row=1, col=1)
 
-    # Elliott-Wellen Labels einzeichnen (Sicherer Array-Zugriff)
+    # Elliott-Wellen Labels einzeichnen (Hier lagen die Probleme - jetzt absolut sicher gelöst)
     if len(peaks_high) > 0:
         fig.add_trace(go.Scatter(
-            x=time_index[peaks_high], y=high_prices[peaks_high],
+            x=[time_index[p] for p in peaks_high], 
+            y=[high_prices[p] for p in peaks_high],
             mode='markers+text', text=["(1)" if i == len(peaks_high)-1 else "" for i in range(len(peaks_high))],
             textposition="top center", font=dict(color="cyan", size=14, family="Arial Black"),
             marker=dict(color='cyan', size=8, symbol='triangle-down'), name='Wellen-Hoch'
@@ -148,7 +150,8 @@ else:
         
     if len(peaks_low) > 0:
         fig.add_trace(go.Scatter(
-            x=time_index[peaks_low], y=low_prices[peaks_low],
+            x=[time_index[p] for p in peaks_low], 
+            y=[low_prices[p] for p in peaks_low],
             mode='markers+text', text=["(A)" if i == len(peaks_low)-1 else "" for i in range(len(peaks_low))],
             textposition="bottom center", font=dict(color="magenta", size=14, family="Arial Black"),
             marker=dict(color='magenta', size=8, symbol='triangle-up'), name='Wellen-Tief'
@@ -186,9 +189,9 @@ else:
         else:
             colors.append("#ff0000" if val_smooth.iloc[i] < val_smooth.shift(1).iloc[i] else "#8b0000")
 
-    fig.add_trace(go.Bar(x=time_index, y=val_smooth, marker_color=colors, name="Momentum"), row=2, col=1)
+    fig.add_trace(go.Bar(x=time_index, y=val_smooth.tolist(), marker_color=colors, name="Momentum"), row=2, col=1)
 
-    sqz_colors = ["#ffff00" if val else "#000000" for val in sqz_on]
+    sqz_colors = ["#ffff00" if val else "#000000" for val in sqz_on.tolist()]
     fig.add_trace(go.Scatter(x=time_index, y=[0]*len(data), mode="markers", 
                              marker=dict(color=sqz_colors, size=5), name="Squeeze Punkte"), row=2, col=1)
 
