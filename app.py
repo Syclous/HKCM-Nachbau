@@ -54,51 +54,55 @@ data = load_data(ticker_cleaned, period, interval)
 if data.empty:
     st.error("Keine Daten vom Server empfangen. Bitte anderen Zeitraum oder Ticker wählen.")
 else:
-    # Bereinigung für den Plotly-X-Achsen-Bug: Index in eine saubere Liste umwandeln
+    # Saubere Konvertierung des Index für Plotly
     time_index = data.index.to_numpy()
     
-    close_prices = data['Close'].squeeze()
-    high_prices = data['High'].squeeze()
-    low_prices = data['Low'].squeeze()
-    open_prices = data['Open'].squeeze()
+    close_prices = data['Close'].squeeze().to_numpy()
+    high_prices = data['High'].squeeze().to_numpy()
+    low_prices = data['Low'].squeeze().to_numpy()
+    open_prices = data['Open'].squeeze().to_numpy()
 
     # --- SQUEEZE MOMENTUM INDIKATOR BERECHNUNG ---
+    close_series = pd.Series(close_prices)
+    high_series = pd.Series(high_prices)
+    low_series = pd.Series(low_prices)
+    
     length = 20
     mult = 2.0
     length_kc = 20
     mult_kc = 1.5
 
-    basis = close_prices.rolling(window=length).mean()
-    dev = mult * close_prices.rolling(window=length).std()
+    basis = close_series.rolling(window=length).mean()
+    dev = mult * close_series.rolling(window=length).std()
     upper_bb = basis + dev
     lower_bb = basis - dev
 
-    tr = pd.concat([high_prices - low_prices, 
-                    (high_prices - close_prices.shift()).abs(), 
-                    (low_prices - close_prices.shift()).abs()], axis=1).max(axis=1)
+    tr = pd.concat([high_series - low_series, 
+                    (high_series - close_series.shift()).abs(), 
+                    (low_series - close_series.shift()).abs()], axis=1).max(axis=1)
     atr = tr.rolling(window=length_kc).mean()
     upper_kc = basis + (mult_kc * atr)
     lower_kc = basis - (mult_kc * atr)
 
     sqz_on = (lower_bb > lower_kc) & (upper_bb < upper_kc)
     
-    highest_high = high_prices.rolling(window=length).max()
-    lowest_low = low_prices.rolling(window=length).min()
+    highest_high = high_series.rolling(window=length).max()
+    lowest_low = low_series.rolling(window=length).min()
     avg_hl = (highest_high + lowest_low) / 2
     avg_all = (avg_hl + basis) / 2
-    val = close_prices - avg_all
+    val = close_series - avg_all
     val_smooth = val.rolling(window=length).mean()
 
     # --- DYNAMISCHER PIVOT / WELLEN ALGORITHMUS ---
-    peaks_high, _ = find_peaks(high_prices.values, distance=pivot_distance)
-    peaks_low, _ = find_peaks(-low_prices.values, distance=pivot_distance)
+    peaks_high, _ = find_peaks(high_prices, distance=pivot_distance)
+    peaks_low, _ = find_peaks(-low_prices, distance=pivot_distance)
 
     # Letzte markante Wendepunkte ermitteln
     last_high_idx = peaks_high[-1] if len(peaks_high) > 0 else 0
     last_low_idx = peaks_low[-1] if len(peaks_low) > 0 else 0
 
-    p_high = high_prices.iloc[last_high_idx]
-    p_low = low_prices.iloc[last_low_idx]
+    p_high = high_prices[last_high_idx]
+    p_low = low_prices[last_low_idx]
 
     # --- HKCM FIBONACCI BOX & INVALIDIERUNGS-LOGIK ---
     if last_high_idx > last_low_idx:
@@ -133,27 +137,22 @@ else:
         name=ticker_cleaned
     ), row=1, col=1)
 
-    # Elliott-Wellen Labels einzeichnen (Nutzt jetzt das bereinigte time_index)
+    # Elliott-Wellen Labels einzeichnen (Sicherer Array-Zugriff)
     if len(peaks_high) > 0:
         fig.add_trace(go.Scatter(
-            x=time_index[peaks_high], y=high_prices.iloc[peaks_high].notnull(),
-            y_val = high_prices.iloc[peaks_high],
+            x=time_index[peaks_high], y=high_prices[peaks_high],
             mode='markers+text', text=["(1)" if i == len(peaks_high)-1 else "" for i in range(len(peaks_high))],
             textposition="top center", font=dict(color="cyan", size=14, family="Arial Black"),
             marker=dict(color='cyan', size=8, symbol='triangle-down'), name='Wellen-Hoch'
         ), row=1, col=1)
-        # Fix für die Y-Werte im Scatter
-        fig.data[-1].y = high_prices.iloc[peaks_high].values
         
     if len(peaks_low) > 0:
         fig.add_trace(go.Scatter(
-            x=time_index[peaks_low], y=low_prices.iloc[peaks_low].notnull(),
+            x=time_index[peaks_low], y=low_prices[peaks_low],
             mode='markers+text', text=["(A)" if i == len(peaks_low)-1 else "" for i in range(len(peaks_low))],
             textposition="bottom center", font=dict(color="magenta", size=14, family="Arial Black"),
             marker=dict(color='magenta', size=8, symbol='triangle-up'), name='Wellen-Tief'
         ), row=1, col=1)
-        # Fix für die Y-Werte im Scatter
-        fig.data[-1].y = low_prices.iloc[peaks_low].values
 
     # HKCM Fibonacci-Box einzeichnen
     fig.add_shape(
@@ -203,7 +202,7 @@ else:
     # --- METRIKEN ---
     st.markdown("### 📊 Aktuelle Zonen-Berechnung & Risikomanagement")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Aktueller Kurs", f"${close_prices.iloc[-1]:.2f}")
+    c1.metric("Aktueller Kurs", f"${close_prices[-1]:.2f}")
     c2.metric("Zone Obergrenze (50.0%)", f"${zone_top:.2f}")
     c3.metric("Zone Untergrenze (78.6%)", f"${zone_bottom:.2f}")
     c4.metric("🛑 Invalidierungs-Level", f"${invalid_level:.2f}")
