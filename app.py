@@ -24,12 +24,11 @@ else:
 
 ticker_cleaned = ticker.split(" ")[0]
 
-# --- NEU: TIMEFRAME & ZEITRAUM LOGIK ---
+# --- TIMEFRAME & ZEITRAUM LOGIK ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("⏱️ Zeiteinheit (Timeframe)")
 timeframe = st.sidebar.selectbox("Intervall wählen", ["1 Tag (1d)", "4 Stunden (4h)", "1 Stunde (1h)"])
 
-# Automatische Anpassung des historischen Zeitraums je nach gewählter Zeiteinheit
 if timeframe == "1 Tag (1d)":
     interval = "1d"
     period = st.sidebar.selectbox("Historischer Zeitraum", ["6mo", "1y", "2y"], index=1)
@@ -55,6 +54,9 @@ data = load_data(ticker_cleaned, period, interval)
 if data.empty:
     st.error("Keine Daten vom Server empfangen. Bitte anderen Zeitraum oder Ticker wählen.")
 else:
+    # Bereinigung für den Plotly-X-Achsen-Bug: Index in eine saubere Liste umwandeln
+    time_index = data.index.to_numpy()
+    
     close_prices = data['Close'].squeeze()
     high_prices = data['High'].squeeze()
     low_prices = data['Low'].squeeze()
@@ -100,28 +102,26 @@ else:
 
     # --- HKCM FIBONACCI BOX & INVALIDIERUNGS-LOGIK ---
     if last_high_idx > last_low_idx:
-        # Aufwärtsbewegung -> Korrektur nach unten erwartet (Kaufbereich)
         diff = p_high - p_low
-        zone_top = p_high - (0.50 * diff)       # 50% Fibo
-        zone_bottom = p_high - (0.786 * diff)   # 78.6% Fibo
-        invalid_level = p_low                  # Invalidierung am Start der Welle 1
+        zone_top = p_high - (0.50 * diff)       
+        zone_bottom = p_high - (0.786 * diff)   
+        invalid_level = p_low                  
         zone_color = "rgba(0, 230, 110, 0.18)"
         line_color = "rgba(0, 230, 110, 0.6)"
         zone_name = "HKCM Kaufbereich (Welle 2)"
         probability = "68%"
     else:
-        # Abwärtsbewegung -> Korrektur nach oben erwartet (Verkaufsbereich)
         diff = p_high - p_low
-        zone_top = p_low + (0.786 * diff)       # 78.6% Fibo
-        zone_bottom = p_low + (0.50 * diff)     # 50% Fibo
-        invalid_level = p_high                 # Invalidierung am Top der Welle 1
+        zone_top = p_low + (0.786 * diff)       
+        zone_bottom = p_low + (0.50 * diff)     
+        invalid_level = p_high                 
         zone_color = "rgba(255, 40, 80, 0.18)"
         line_color = "rgba(255, 40, 80, 0.6)"
         zone_name = "HKCM Zielzone (Short)"
         probability = "62%"
 
-    start_date_box = data.index[min(last_high_idx, last_low_idx)]
-    end_date_box = data.index[-1]
+    start_date_box = time_index[min(last_high_idx, last_low_idx)]
+    end_date_box = time_index[-1]
 
     # --- CHART ERSTELLUNG ---
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
@@ -129,26 +129,31 @@ else:
 
     # 1. Candlestick Chart
     fig.add_trace(go.Candlestick(
-        x=data.index, open=open_prices, high=high_prices, low=low_prices, close=close_prices,
+        x=time_index, open=open_prices, high=high_prices, low=low_prices, close=close_prices,
         name=ticker_cleaned
     ), row=1, col=1)
 
-    # Elliott-Wellen Labels einzeichnen (Cyan = Hochs, Magenta = Tiefs)
+    # Elliott-Wellen Labels einzeichnen (Nutzt jetzt das bereinigte time_index)
     if len(peaks_high) > 0:
         fig.add_trace(go.Scatter(
-            x=data.index[peaks_high], y=high_prices.iloc[peaks_high],
+            x=time_index[peaks_high], y=high_prices.iloc[peaks_high].notnull(),
+            y_val = high_prices.iloc[peaks_high],
             mode='markers+text', text=["(1)" if i == len(peaks_high)-1 else "" for i in range(len(peaks_high))],
             textposition="top center", font=dict(color="cyan", size=14, family="Arial Black"),
             marker=dict(color='cyan', size=8, symbol='triangle-down'), name='Wellen-Hoch'
         ), row=1, col=1)
+        # Fix für die Y-Werte im Scatter
+        fig.data[-1].y = high_prices.iloc[peaks_high].values
         
     if len(peaks_low) > 0:
         fig.add_trace(go.Scatter(
-            x=data.index[peaks_low], y=low_prices.iloc[peaks_low],
+            x=time_index[peaks_low], y=low_prices.iloc[peaks_low].notnull(),
             mode='markers+text', text=["(A)" if i == len(peaks_low)-1 else "" for i in range(len(peaks_low))],
             textposition="bottom center", font=dict(color="magenta", size=14, family="Arial Black"),
             marker=dict(color='magenta', size=8, symbol='triangle-up'), name='Wellen-Tief'
         ), row=1, col=1)
+        # Fix für die Y-Werte im Scatter
+        fig.data[-1].y = low_prices.iloc[peaks_low].values
 
     # HKCM Fibonacci-Box einzeichnen
     fig.add_shape(
@@ -182,10 +187,10 @@ else:
         else:
             colors.append("#ff0000" if val_smooth.iloc[i] < val_smooth.shift(1).iloc[i] else "#8b0000")
 
-    fig.add_trace(go.Bar(x=data.index, y=val_smooth, marker_color=colors, name="Momentum"), row=2, col=1)
+    fig.add_trace(go.Bar(x=time_index, y=val_smooth, marker_color=colors, name="Momentum"), row=2, col=1)
 
     sqz_colors = ["#ffff00" if val else "#000000" for val in sqz_on]
-    fig.add_trace(go.Scatter(x=data.index, y=[0]*len(data), mode="markers", 
+    fig.add_trace(go.Scatter(x=time_index, y=[0]*len(data), mode="markers", 
                              marker=dict(color=sqz_colors, size=5), name="Squeeze Punkte"), row=2, col=1)
 
     fig.update_layout(height=780, template="plotly_dark", xaxis_rangeslider_visible=False,
